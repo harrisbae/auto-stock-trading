@@ -1,0 +1,6 @@
+yfinance>=0.2.31
+pandas>=2.1.1
+numpy>=1.26.0
+requests>=2.31.0
+schedule>=1.2.1
+python-dotenv>=1.0.0 

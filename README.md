@@ -18,96 +18,85 @@
 | Slack 워크스페이스 | Slack 가입 및 워크스페이스 생성 |
 | Slack 채널 | 알림 받을 채널 생성 (예: #trading-signal) |
 | Incoming Webhook | Slack에서 Webhook URL 생성 |
-| Python 3 환경 | requests, pandas, numpy, yfinance 설치 필요 |
+| Python 3 환경 | 필요한 패키지는 requirements.txt 참조 |
 
+## 4. 설치 및 설정 방법
 
-## 4. Slack Webhook 설정 방법
+1. 저장소 클론
+   ```bash
+   git clone https://github.com/yourusername/auto-stock-trading.git
+   cd auto-stock-trading
+   ```
 
-1. Slack 로그인
-2. [Incoming Webhooks](https://slack.com/apps/A0F7XDUAZ-incoming-webhooks) 앱 추가
-3. Webhook URL 생성 및 복사
+2. 가상환경 생성 및 활성화 (선택사항)
+   ```bash
+   python -m venv venv
+   # Windows
+   venv\Scripts\activate
+   # macOS/Linux
+   source venv/bin/activate
+   ```
 
+3. 필요한 패키지 설치
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-## 5. Python 코드 (최종 버전)
+4. Slack Webhook URL 설정
+   - Slack 앱 설정에서 [Incoming Webhooks](https://slack.com/apps/A0F7XDUAZ-incoming-webhooks) 앱 추가
+   - Webhook URL 생성 및 복사
+   - 프로젝트 루트 디렉토리에 `.env` 파일 생성하고 URL 설정
+   ```
+   SLACK_WEBHOOK_URL=https://hooks.slack.com/services/XXX/YYY/ZZZ
+   ```
 
-```python
-import yfinance as yf
-import pandas as pd
-import numpy as np
-import requests
+## 5. 사용 방법
 
-# Slack Webhook URL 입력
-SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/XXX/YYY/ZZZ'
-
-# Slack 알림 함수
-def send_slack_message(message):
-    payload = {"text": message}
-    response = requests.post(SLACK_WEBHOOK_URL, json=payload)
-    if response.status_code == 200:
-        print("Slack 메시지 전송 성공!")
-    else:
-        print("Slack 메시지 전송 실패:", response.text)
-
-# MFI 계산 함수
-def calculate_mfi(df, period=14):
-    typical_price = (df['High'] + df['Low'] + df['Close']) / 3
-    money_flow = typical_price * df['Volume']
-    positive_flow = []
-    negative_flow = []
-
-    for i in range(1, len(typical_price)):
-        if typical_price[i] > typical_price[i-1]:
-            positive_flow.append(money_flow[i])
-            negative_flow.append(0)
-        else:
-            positive_flow.append(0)
-            negative_flow.append(money_flow[i])
-
-    positive_mf = pd.Series(positive_flow).rolling(window=period).sum()
-    negative_mf = pd.Series(negative_flow).rolling(window=period).sum()
-    mfi = 100 * (positive_mf / (positive_mf + negative_mf))
-    return mfi
-
-# PLTR 데이터 다운로드 및 신호 생성
-def check_trading_signal():
-    ticker = 'PLTR'
-    df = yf.download(ticker, period='6mo', interval='1d')
-
-    df['MA20'] = df['Close'].rolling(window=20).mean()
-    df['STD'] = df['Close'].rolling(window=20).std()
-    df['UpperBand'] = df['MA20'] + (2 * df['STD'])
-    df['LowerBand'] = df['MA20'] - (2 * df['STD'])
-    df['%B'] = (df['Close'] - df['LowerBand']) / (df['UpperBand'] - df['LowerBand'])
-    df['MFI'] = calculate_mfi(df)
-
-    latest = df.iloc[-1]
-    signal = "Hold"
-
-    if latest['%B'] < 0.2 and latest['MFI'] < 20:
-        signal = "Buy"
-    elif latest['%B'] > 0.8 and latest['MFI'] > 80:
-        signal = "Sell"
-
-    message = f"[PLTR]\n가격: ${latest['Close']:.2f}\n%B: {latest['%B']:.2f}\nMFI: {latest['MFI']:.2f}\n신호: {signal}"
-
-    if signal in ["Buy", "Sell"]:
-        send_slack_message(message)
-    else:
-        print("현재 특별한 신호 없음.")
-
-# 메인 실행
-if __name__ == "__main__":
-    check_trading_signal()
+### 즉시 실행
+현재 PLTR 주식의 매매 신호를 확인하려면:
+```bash
+python main.py --now
 ```
 
+### 스케줄러 실행
+매일 정해진 시간(기본값: 오전 6시)에 자동으로 신호를 확인하도록 설정:
+```bash
+python main.py --schedule
+```
 
-## 6. 스케줄링 (옵션)
-- 이 스크립트를 매일 자동 실행하려면:
-  - 윈도우: 작업 스케줄러 사용
-  - 리눅스/맥: crontab 사용
+## 6. 프로젝트 구조
+```
+auto-stock-trading/
+├── main.py                  # 메인 실행 파일
+├── requirements.txt         # 필요한 패키지 목록
+├── .env                     # 환경 변수 설정 (직접 생성 필요)
+├── README.md                # 프로젝트 설명
+└── src/                     # 소스 코드 디렉토리
+    ├── __init__.py          # 패키지 초기화 파일
+    ├── config.py            # 설정 파일
+    ├── stock_data.py        # 주식 데이터 관련 기능
+    ├── indicators.py        # 기술적 지표 계산 기능
+    ├── signal.py            # 매매 신호 생성 기능
+    └── notification.py      # Slack 알림 관련 기능
+```
 
+## 7. 커스터마이징
 
-## 7. 참고사항
+### 다른 주식으로 변경
+`src/config.py` 파일에서 `TICKER` 값을 변경하여 다른 주식을 모니터링할 수 있습니다.
+
+### 기술적 지표 변경
+`src/config.py` 파일에서 다음 값들을 조정할 수 있습니다:
+- MA_PERIOD: 이동평균선 기간
+- BOLLINGER_BANDS_STD: 볼린저 밴드 표준편차
+- MFI_PERIOD: MFI 계산 기간
+- BUY_B_THRESHOLD, BUY_MFI_THRESHOLD: 매수 신호 임계값
+- SELL_B_THRESHOLD, SELL_MFI_THRESHOLD: 매도 신호 임계값
+
+### 스케줄링 시간 변경
+`main.py` 파일의 `run_scheduler` 함수에서 `schedule.every().day.at("06:00")` 부분을 원하는 시간으로 변경하세요.
+
+## 8. 참고사항
 - Webhook URL은 외부 유출 금지
 - Slack 무료 플랜에서도 충분히 운영 가능
 - 주가 변동이 적을 때는 "Hold" 신호가 반복될 수 있음
