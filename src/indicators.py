@@ -17,10 +17,12 @@ def calculate_bollinger_bands(df):
     print("데이터프레임 컬럼:", df.columns.tolist())
     
     df = df.copy()
-    df['MA20'] = df['Close'].rolling(window=MA_PERIOD).mean()
-    df['STD'] = df['Close'].rolling(window=MA_PERIOD).std()
-    df['UpperBand'] = df['MA20'] + (BOLLINGER_BANDS_STD * df['STD'])
-    df['LowerBand'] = df['MA20'] - (BOLLINGER_BANDS_STD * df['STD'])
+    # MA_PERIOD 대신 25 사용
+    MA25 = 25
+    df['MA25'] = df['Close'].rolling(window=MA25).mean()
+    df['STD'] = df['Close'].rolling(window=MA25).std()
+    df['UpperBand'] = df['MA25'] + (BOLLINGER_BANDS_STD * df['STD'])
+    df['LowerBand'] = df['MA25'] - (BOLLINGER_BANDS_STD * df['STD'])
     
     # 간단한 방식으로 계산
     try:

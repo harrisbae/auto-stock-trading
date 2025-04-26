@@ -88,17 +88,27 @@ def set_target_params(purchase_price, target_gain_percent):
     구매가 및 목표 수익률을 설정합니다.
     
     Args:
-        purchase_price (float): 주식 구매 가격
-        target_gain_percent (float): 목표 수익률 (%)
+        purchase_price (float, None): 주식 구매 가격, None인 경우 초기화
+        target_gain_percent (float, None): 목표 수익률 (%), None인 경우 초기화
     """
-    config.PURCHASE_PRICE = float(purchase_price)
-    config.TARGET_GAIN_PERCENT = float(target_gain_percent)
+    if purchase_price is None:
+        config.PURCHASE_PRICE = None
+    else:
+        config.PURCHASE_PRICE = float(purchase_price)
+        
+    if target_gain_percent is None:
+        config.TARGET_GAIN_PERCENT = None
+    else:
+        config.TARGET_GAIN_PERCENT = float(target_gain_percent)
     
-    print(f"구매가: ${config.PURCHASE_PRICE:.2f}, 목표 수익률: {config.TARGET_GAIN_PERCENT:.2f}%")
-    
-    # 목표 가격 계산
-    target_price = config.PURCHASE_PRICE * (1 + config.TARGET_GAIN_PERCENT / 100)
-    print(f"목표 가격: ${target_price:.2f}")
+    if config.PURCHASE_PRICE is not None and config.TARGET_GAIN_PERCENT is not None:
+        print(f"구매가: ${config.PURCHASE_PRICE:.2f}, 목표 수익률: {config.TARGET_GAIN_PERCENT:.2f}%")
+        
+        # 목표 가격 계산
+        target_price = config.PURCHASE_PRICE * (1 + config.TARGET_GAIN_PERCENT / 100)
+        print(f"목표 가격: ${target_price:.2f}")
+    else:
+        print("목표 매매 파라미터가 초기화되었습니다.")
     
     return config.PURCHASE_PRICE, config.TARGET_GAIN_PERCENT
 
