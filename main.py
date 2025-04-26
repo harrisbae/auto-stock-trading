@@ -194,11 +194,19 @@ def main():
     ticker = None
     if args.stock_info:
         try:
-            stock_info_parts = args.stock_info.split('/')
-            if len(stock_info_parts) >= 3:
-                ticker = stock_info_parts[0].strip()
-                purchase_price = float(stock_info_parts[1].strip())
-                target_gain = float(stock_info_parts[2].strip())
+            # 마지막 두 개의 슬래시만 분리 기준으로 사용
+            last_parts = args.stock_info.split('/')
+            
+            # 마지막 두 값은 구매가와 목표수익률
+            if len(last_parts) >= 3:
+                # 마지막 두 항목을 제외한 모든 것이 티커 (슬래시가 포함된 티커를 지원)
+                target_gain = float(last_parts[-1].strip())
+                purchase_price = float(last_parts[-2].strip())
+                
+                # 티커는 마지막 두 항목을 제외한 전체 문자열
+                # 마지막 두 항목의 길이와 구분자 슬래시 2개를 고려하여 원래 문자열에서 제외
+                ticker_len = len(last_parts[-1]) + len(last_parts[-2]) + 2
+                ticker = args.stock_info[:-ticker_len].strip()
                 
                 # 종목 및 목표 파라미터 설정
                 set_ticker(ticker)
@@ -212,6 +220,10 @@ def main():
     else:
         # 개별 인자 처리
         ticker = args.ticker
+        
+        # ticker가 제공된 경우 set_ticker 호출
+        if ticker:
+            set_ticker(ticker)
         
         # 구매가 및 목표 수익률이 모두 제공된 경우에만 설정
         if args.purchase_price is not None and args.target_gain is not None:
