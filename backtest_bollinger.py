@@ -402,8 +402,8 @@ def run_backtest(symbol='SPY', start_date=None, end_date=None, initial_capital=1
 
 if __name__ == "__main__":
     run_backtest(
-        symbol='SPY',
-        start_date='2022-04-26',
+        symbol='AAPL',
+        start_date='2020-01-01',
         end_date='2025-04-25',
         initial_capital=10000,
         window=20,
