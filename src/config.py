@@ -4,22 +4,24 @@ from dotenv import load_dotenv
 # .env 파일에서 환경 변수 로드
 load_dotenv()
 
-# Slack 관련 설정 - 직접 URL 설정
-# 실제 웹훅 URL 직접 설정
-SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/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'
-
-# 환경 변수에서 로드하는 코드 (주석 처리)
-# raw_webhook_url = os.getenv('SLACK_WEBHOOK_URL', '')
-# if raw_webhook_url.startswith('ttps://'):
-#     SLACK_WEBHOOK_URL = 'h' + raw_webhook_url
-# else:
-#     SLACK_WEBHOOK_URL = raw_webhook_url
+# Slack 관련 설정 - 환경 변수에서 로드
+# 환경 변수에서 웹훅 URL 로드
+raw_webhook_url = os.getenv('SLACK_WEBHOOK_URL', '')
+if raw_webhook_url.startswith('ttps://'):
+    SLACK_WEBHOOK_URL = 'h' + raw_webhook_url
+else:
+    SLACK_WEBHOOK_URL = raw_webhook_url
 
 # % 같은 쓸데없는 문자 제거
 if SLACK_WEBHOOK_URL and SLACK_WEBHOOK_URL[-1] == '%':
     SLACK_WEBHOOK_URL = SLACK_WEBHOOK_URL[:-1]
 
-print(f"설정된 Webhook URL: {SLACK_WEBHOOK_URL[:10]}...{SLACK_WEBHOOK_URL[-5:] if len(SLACK_WEBHOOK_URL) > 15 else ''}")
+if SLACK_WEBHOOK_URL:
+    print(f"설정된 Webhook URL: {SLACK_WEBHOOK_URL[:10]}...{SLACK_WEBHOOK_URL[-5:] if len(SLACK_WEBHOOK_URL) > 15 else ''}")
+else:
+    print("Webhook URL이 설정되지 않았습니다. 알림을 받으려면 다음 중 하나의 방법으로 설정하세요:")
+    print("1. .env 파일에 SLACK_WEBHOOK_URL 환경 변수 추가")
+    print("2. --webhook 옵션을 사용하여 실행 시 URL 제공")
 
 # 설정 클래스
 class Config:
