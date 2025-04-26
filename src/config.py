@@ -32,7 +32,7 @@ class Config:
     DATA_INTERVAL = '1d'
     
     # 기술적 지표 설정
-    MA_PERIOD = 20
+    MA_PERIOD = 25
     BOLLINGER_BANDS_STD = 2
     MFI_PERIOD = 14
     

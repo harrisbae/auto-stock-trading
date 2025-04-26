@@ -1,165 +1,103 @@
-# auto-stock-trading
+# Auto Stock Trading
 
-# 주식 거래 자동화 신호 + Slack 알림 시스템
+자동화된 주식 거래 신호 모니터링 및 백테스팅 도구입니다.
 
-## 1. 목표
-- 주식 데이터를 모니터링하여 기술적 지표 기반 매수/매도 신호를 자동으로 감지
-- 목표 수익률 달성 시 알림 기능 제공
-- 신호 발생 시 Slack 채널에 실시간 알림 전송
+## 개요
 
-## 2. 시스템 구성도
-```
-[Yahoo Finance 데이터] --> [Python 분석] --> [매수/매도/목표가 신호 판단] --> [Slack 알림]
-```
+이 프로젝트는 다양한 기술적 지표를 기반으로 한 주식 거래 전략을 개발하고 백테스팅하기 위한 도구를 제공합니다. 주요 기능은 다음과 같습니다:
 
-## 3. 주요 기능
-- **기술적 지표 모니터링**: 볼린저 밴드 %B와 MFI 지표를 활용한 매수/매도 신호 생성
-- **목표 수익률 모니터링**: 설정한 구매가 기준 목표 수익률 달성 시 알림
-- **Slack 알림**: 중요 신호 발생 시 Slack으로 실시간 알림
-- **스케줄링**: 매일 정해진 시간에 자동으로 신호 확인 및 알림
-- **다양한 종목 지원**: 명령줄 인자로 원하는 종목 지정 가능
+1. 실시간 주식 데이터 모니터링
+2. 다양한 기술적 지표 기반 거래 신호 생성
+3. 거래 전략 백테스팅
+4. 성과 분석 및 시각화
 
-## 4. 필요한 준비물
+## 설치 방법
 
-| 항목 | 설명 |
-|:---|:---|
-| Slack 워크스페이스 | Slack 가입 및 워크스페이스 생성 |
-| Slack 채널 | 알림 받을 채널 생성 (예: #trading-signal) |
-| Incoming Webhook | Slack에서 Webhook URL 생성 |
-| Python 3 환경 | 필요한 패키지는 requirements.txt 참조 |
-
-## 5. 설치 및 설정 방법
-
-1. 저장소 클론
-   ```bash
-   git clone https://github.com/yourusername/auto-stock-trading.git
-   cd auto-stock-trading
-   ```
-
-2. 가상환경 생성 및 활성화 (선택사항)
-   ```bash
-   python -m venv venv
-   # Windows
-   venv\Scripts\activate
-   # macOS/Linux
-   source venv/bin/activate
-   ```
-
-3. 필요한 패키지 설치
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. Slack Webhook URL 설정
-   - Slack 앱 설정에서 [Incoming Webhooks](https://slack.com/apps/A0F7XDUAZ-incoming-webhooks) 앱 추가
-   - Webhook URL 생성 및 복사
-   - 프로젝트 루트 디렉토리에 `.env` 파일 생성하고 URL 설정
-   ```
-   SLACK_WEBHOOK_URL=https://hooks.slack.com/services/XXX/YYY/ZZZ
-   ```
-
-## 6. 사용 방법
-
-### 기본 사용법
 ```bash
-python main.py [--now | --schedule] [--ticker TICKER] [--webhook WEBHOOK_URL] [--test-slack] [--force-notify] [--notify-method METHOD] [--use-blocks] [--purchase-price PRICE] [--target-gain PERCENT] [--stock-info TICKER/PRICE/GAIN]
+git clone https://github.com/yourusername/auto-stock-trading.git
+cd auto-stock-trading
+pip install -r requirements.txt
 ```
 
-### 즉시 실행 예제
+## 사용 방법
+
+### 실시간 거래 신호 모니터링
+
 ```bash
-# 기본 종목(PLTR) 즉시 분석
-python main.py --now
-
-# 특정 종목(AAPL) 분석
-python main.py --now --ticker AAPL
-
-# 목표 수익률 설정 (AAPL 주식, 구매가 $150.5, 목표 수익률 10%)
-python main.py --now --stock-info AAPL/150.5/10
-
-# 강제 알림 전송
-python main.py --now --ticker MSFT --force-notify
+python main.py --ticker SPY --interval 1d
 ```
 
-### 스케줄러 실행 예제
+추가 옵션:
+- `--webhook URL`: 슬랙 웹훅 URL 설정
+- `--test-slack`: 슬랙 연결 테스트
+- `--interval`: 데이터 조회 간격 (1m, 5m, 15m, 30m, 1h, 1d, 1wk, 1mo, 3mo)
+- `--target`: 목표 수익률 설정 (기본값: 5%)
+
+### 백테스팅 실행
+
+다양한 백테스팅 스크립트를 제공합니다:
+
 ```bash
-# 기본 종목으로 스케줄러 실행
-python main.py --schedule
+# 기본 백테스팅 (이동평균 기반)
+python backtest_ma_strategy.py
 
-# 특정 종목으로 스케줄러 실행
-python main.py --schedule --ticker TSLA
+# 부분 매매 전략 백테스팅 (다중 목표 수익률)
+python backtest_target_partial_multi.py
 
-# 목표 수익률 감시와 함께 스케줄러 실행
-python main.py --schedule --stock-info NVDA/450.75/15
+# 볼린저 밴드 기반 백테스팅
+python backtest_bollinger.py
 ```
 
-### 기타 기능
-```bash
-# Slack 알림 테스트
-python main.py --test-slack
+## 주요 파일 구조
 
-# 블록 형식의 Slack 알림 테스트
-python main.py --test-slack --use-blocks
-
-# 웹훅 URL 직접 설정
-python main.py --now --webhook https://hooks.slack.com/services/XXX/YYY/ZZZ
-```
-
-## 7. 프로젝트 구조
 ```
 auto-stock-trading/
-├── main.py                  # 메인 실행 파일
-├── requirements.txt         # 필요한 패키지 목록
-├── .env                     # 환경 변수 설정 (직접 생성 필요)
-├── .gitignore               # Git 무시 파일 목록
-├── README.md                # 프로젝트 설명
-└── src/                     # 소스 코드 디렉토리
-    ├── __init__.py          # 패키지 초기화 파일
-    ├── config.py            # 설정 파일
-    ├── stock_data.py        # 주식 데이터 관련 기능
-    ├── indicators.py        # 기술적 지표 계산 기능
-    ├── signal.py            # 매매 신호 생성 기능
-    └── notification.py      # Slack 알림 관련 기능
+├── main.py                       # 메인 실행 파일
+├── README.md                     # 프로젝트 설명
+├── requirements.txt              # 필수 패키지 목록
+├── src/
+│   ├── config.py                 # 환경 설정
+│   ├── trading_signal.py         # 거래 신호 생성 로직
+│   └── utils.py                  # 유틸리티 함수
+├── backtest_ma_strategy.py       # MA 전략 백테스팅
+├── backtest_target_partial_multi.py  # 부분 매매 백테스팅
+├── backtest_bollinger.py         # 볼린저 밴드 백테스팅
+├── results/                      # 백테스팅 결과 그래프
+│   └── *.png                     # 결과 그래프 파일
+└── docs/                         # 백테스팅 결과 문서
+    ├── README.md                     # 문서 개요
+    ├── backtest_summary_all_strategies.md # 종합 결과 요약
+    └── backtest_bollinger_bands.md   # 볼린저 밴드 전략 결과
 ```
 
-## 8. 커스터마이징
+## 백테스팅 전략
 
-### 기본 종목 변경
-`src/config.py` 파일에서 `DEFAULT_TICKER` 값을 변경하여 기본 모니터링 종목을 변경할 수 있습니다.
+### 볼린저 밴드 전략
+볼린저 밴드와 MFI 지표를 활용한 트레이딩 전략입니다. 자세한 내용은 [백테스팅 결과](docs/backtest_bollinger_bands.md)를 참조하세요.
 
-### 기술적 지표 임계값 변경
-`src/config.py` 파일에서 다음 값들을 조정할 수 있습니다:
-- `MA_PERIOD`: 이동평균선 기간 (기본값: 20)
-- `BOLLINGER_BANDS_STD`: 볼린저 밴드 표준편차 (기본값: 2)
-- `MFI_PERIOD`: MFI 계산 기간 (기본값: 14)
-- `BUY_B_THRESHOLD`: 매수 신호 %B 임계값 (기본값: 0.2)
-- `BUY_MFI_THRESHOLD`: 매수 신호 MFI 임계값 (기본값: 20)
-- `SELL_B_THRESHOLD`: 매도 신호 %B 임계값 (기본값: 0.8)
-- `SELL_MFI_THRESHOLD`: 매도 신호 MFI 임계값 (기본값: 80)
+### MA 전략
+볼린저 밴드의 %B 지표를 기반으로 한 MA20과 MA25 전략입니다. 자세한 내용은 [백테스팅 결과](backtest_ma_results.md)를 참조하세요.
 
-### 스케줄링 시간 변경
-`main.py` 파일의 `run_scheduler` 함수에서 `schedule.every().day.at("06:00")` 부분을 원하는 시간으로 변경하세요.
+### 부분 매매 전략
+목표 수익률(5%, 10%, 20%)에 따른 부분 매매 전략입니다. 자세한 내용은 [백테스팅 결과](backtest_target.md)를 참조하세요.
 
-## 9. 신호 종류 설명
+## 백테스팅 결과 문서
 
-프로그램은 세 가지 신호를 제공합니다:
+모든 백테스팅 전략의 결과를 종합적으로 분석하고 비교한 문서는 [docs 폴더](docs)에서 확인할 수 있습니다. 주요 문서는 다음과 같습니다:
 
-1. **기술적 신호**: %B와 MFI 지표를 기반으로 계산
-   - `Buy`: %B가 매수 임계값보다 낮고 MFI가 매수 임계값보다 낮을 때
-   - `Sell`: %B가 매도 임계값보다 높고 MFI가 매도 임계값보다 높을 때
-   - `Hold`: 위 조건에 해당하지 않을 때
+- [종합 결과 요약](docs/backtest_summary_all_strategies.md) - 모든 전략의 성과 비교
+- [볼린저 밴드 전략 결과](docs/backtest_bollinger_bands.md) - 볼린저 밴드 전략 상세 분석
 
-2. **목표가 신호**: 설정한 구매가 대비 목표 수익률 도달 여부
-   - `Target_Reached`: 현재 가격이 목표 수익률을 달성했을 때
-   - `Hold`: 목표 수익률에 도달하지 않았을 때
+## 기여 방법
 
-3. **최종 신호**: 위 두 신호를 종합한 최종 판단
-   - 목표가 신호가 `Target_Reached`이면 최종 신호도 `Target_Reached`
-   - 그렇지 않으면 기술적 신호를 최종 신호로 사용
+1. 이 저장소를 포크합니다.
+2. 새로운 브랜치를 생성합니다: `git checkout -b feature/your-feature-name`
+3. 변경사항을 커밋합니다: `git commit -m 'Add some feature'`
+4. 포크한 저장소로 푸시합니다: `git push origin feature/your-feature-name`
+5. Pull Request를 제출합니다.
 
-## 10. 참고사항
-- Webhook URL은 외부 유출 금지 (.env 파일은 .gitignore에 포함됨)
-- Slack 무료 플랜에서도 충분히 운영 가능
-- 주가 변동이 적을 때는 "Hold" 신호가 반복될 수 있음
-- 설정한 구매가가 현재 가격보다 높으면 수익률은 음수로 표시됨
+## 라이센스
+
+[MIT](LICENSE)
 
 
