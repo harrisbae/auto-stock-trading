@@ -287,4 +287,154 @@ auto-stock-trading/
 
 MIT License
 
+## 17. 스케줄러 활용 방법
+
+스케줄러를 사용하면 정해진 시간에 자동으로 주식 데이터를 분석하고 매매 신호를 확인할 수 있습니다.
+
+### 기본 스케줄러 설정
+```bash
+# 기본 설정으로 스케줄러 실행 (기본 종목, 매일 오전 6시 실행)
+python main.py --schedule
+```
+
+### 스케줄러 실행 옵션
+```bash
+# 특정 종목으로 스케줄러 실행
+python main.py --schedule --ticker AAPL
+
+# 분할 매수 전략과 함께 스케줄러 실행
+python main.py --schedule --ticker TSLA --tranche=3 --risk-management=medium
+
+# 목표 수익률 감시와 함께 스케줄러 실행
+python main.py --schedule --stock-info NVDA/450.75/15
+
+# 특정 시간에 스케줄러 실행 (오전 9시)
+python main.py --schedule --schedule-time "09:00"
+
+# 특정 시간에 특정 종목 분석 및 강제 알림 설정
+python main.py --schedule --schedule-time "16:30" --ticker MSFT --force-notify
+```
+
+### 스케줄 시간 변경
+스케줄 실행 시간을 변경하려면 `main.py` 파일의 `run_scheduler` 함수에서 다음 부분을 수정하세요:
+```python
+# 기본값: 매일 오전 6시 실행
+schedule.every().day.at("06:00").do(job)
+
+# 수정 예: 주중(월-금) 오전 9시와 오후 4시에 실행
+schedule.every().monday.to.friday.at("09:00").do(job)
+schedule.every().monday.to.friday.at("16:00").do(job)
+```
+
+### 스케줄러 실행 주기 정보
+스케줄러는 기본적으로 **매일 1회** 지정된 시간(기본값: 오전 6시)에 실행됩니다. 스케줄러가 실행되면 다음 동작을 수행합니다:
+
+1. 설정된 종목의 최신 주가 데이터를 가져옵니다.
+2. 기술적 지표(볼린저 밴드, %B, MFI 등)를 계산합니다.
+3. 매매 신호를 생성합니다.
+4. 매수/매도 신호가 발생하면 Slack으로 알림을 전송합니다.
+5. `force_notify` 옵션이 활성화된 경우 매매 신호가 없어도 일일 보고서를 전송합니다.
+
+스케줄러는 설정된 시간 이후 계속 실행 상태를 유지하며, 다음 예정된 시간에 자동으로 작업을 수행합니다.
+
+### 스케줄러 백그라운드 실행
+Linux/macOS 환경에서 백그라운드로 스케줄러를 실행하는 방법:
+```bash
+# 기본 백그라운드 실행
+nohup python main.py --schedule > trading_log.txt 2>&1 &
+
+# 특정 종목과 시간 지정하여 백그라운드 실행
+nohup python main.py --schedule --ticker AAPL --schedule-time "09:30" > apple_trading_log.txt 2>&1 &
+
+# 여러 옵션을 적용하여 백그라운드 실행
+nohup python main.py --schedule --ticker TSLA --schedule-time "10:00" --force-notify --tranche=5 > tesla_trading_log.txt 2>&1 &
+```
+
+Windows 환경에서 작업 스케줄러를 이용한 실행 방법:
+1. 작업 스케줄러 열기
+2. 기본 작업 만들기 선택
+3. 트리거: 매일 또는 원하는 간격 설정
+4. 동작: 프로그램 시작 선택, `python`과 인자로 `main.py --schedule` 입력
+
+## 18. 언어 설정
+
+이 프로그램은 한국어(ko)와 영어(en) 두 가지 언어를 지원합니다. 원하는 언어로 시스템 메시지와 알림을 받을 수 있습니다.
+
+### 언어 설정 방법
+1. **환경 변수로 설정**:
+   `.env` 파일에 다음 설정을 추가하여 기본 언어를 설정할 수 있습니다:
+   ```
+   LANGUAGE=ko  # 한국어 (기본값)
+   # 또는
+   LANGUAGE=en  # 영어
+   ```
+
+2. **코드에서 설정**:
+   언제든지 코드에서 직접 언어를 변경할 수 있습니다:
+   ```python
+   from src.config import set_language
+   
+   # 한국어로 설정
+   set_language('ko')
+   
+   # 영어로 설정
+   set_language('en')
+   ```
+
+3. **명령줄에서 설정**:
+   ```bash
+   # 영어로 실행
+   python main.py --now --language en
+   
+   # 한국어로 실행
+   python main.py --now --language ko
+   ```
+
+### 지원 기능
+- 거래 신호 메시지
+- 거래 이유 설명
+- Slack 알림 메시지
+- 콘솔 출력 메시지
+
+기본 언어는 한국어(ko)로 설정되어 있습니다.
+
+## 언어 설정 방법
+
+이 애플리케이션은 한국어(기본값)와 영어를 지원합니다. 언어 설정 방법은 다음과 같습니다:
+
+### 1. 명령줄 인자로 설정
+
+프로그램 실행 시 `--language` 인자를 사용하여 언어를 설정할 수 있습니다.
+
+```bash
+# 영어로 설정
+python main.py --ticker AAPL --language en
+
+# 한국어로 설정
+python main.py --ticker AAPL --language ko
+```
+
+### 2. 환경 변수로 설정
+
+`.env` 파일에 `LANGUAGE` 환경 변수를 추가하여 기본 언어를 설정할 수 있습니다:
+
+```
+LANGUAGE=en  # 영어
+```
+또는
+```
+LANGUAGE=ko  # 한국어
+```
+
+### 3. 코드에서 직접 설정
+
+`src/config.py` 파일에서 기본 언어를 변경할 수 있습니다:
+
+```python
+# .env에서 언어 설정 로드 (기본값 설정)
+LANGUAGE = os.getenv('LANGUAGE', 'ko')  # 'ko'를 'en'으로 변경하면 영어가 기본값이 됩니다
+```
+
+프로그램에서 영어를 사용하면 모든 거래 신호, 메시지, 이유 등이 영어로 표시됩니다.
+
 

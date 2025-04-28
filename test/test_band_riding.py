@@ -100,19 +100,22 @@ class TestBandRiding(unittest.TestCase):
                     df_with_indicators.loc[df_with_indicators.index[idx], 'Volume'] *= 1.5
         
         elif type == 'weak':
-            # 약한 밴드타기: 상단밴드에 접촉하지 않도록 설정
+            # 약한 밴드타기: 상단밴드에 일부는 접촉하지만 연속성이 없도록 설정
             for i in range(5):
                 idx = len(df_with_indicators) - 5 + i
-                if i < 2:  # 앞의 2일은 0.7 정도로 설정
-                    target_b = 0.5 + (i * 0.1)
-                else:   # 나머지는 0.5 미만
-                    target_b = 0.3 + (i * 0.02)
+                if i == 1 or i == 3:  # 1일, 3일째만 0.8 이상으로 설정 (연속성 깨기)
+                    target_b = 0.82
+                else:  # 나머지는 0.8 미만으로 설정
+                    target_b = 0.5 + (i * 0.05)
                     
                 df_with_indicators.loc[df_with_indicators.index[idx], '%B'] = target_b
                 
                 mean = df_with_indicators.loc[df_with_indicators.index[idx], 'MA25']
                 std = df_with_indicators.loc[df_with_indicators.index[idx], 'STD']
                 df_with_indicators.loc[df_with_indicators.index[idx], 'Close'] = mean + (target_b * 2 - 1) * 2 * std
+                
+                # 약한 밴드타기에서는 거래량도 일관되게 감소시킴
+                df_with_indicators.loc[df_with_indicators.index[idx], 'Volume'] = df_with_indicators.iloc[idx-1]['Volume'] * 0.9
         
         return df_with_indicators
     
@@ -160,23 +163,59 @@ class TestBandRiding(unittest.TestCase):
         # 일반 강도의 밴드타기 데이터 준비
         normal_data = self.normal_riding_data.copy()
         
-        # 정확하게 강한 추세가 아니라고 판단되도록 추가 조정
+        # 일반 밴드타기의 특성 강화 - 상단밴드 접촉은 하지만 강한 추세는 아니도록
+        consecutive_touch_days = 0
         for i in range(5):
             idx = len(normal_data) - 5 + i
-            # 거래량 감소
-            normal_data.loc[normal_data.index[idx], 'Volume'] = normal_data.iloc[idx-1]['Volume'] * 0.5
+            
+            # 거래량 변동 - 일관된 증가가 아닌 등락을 보이도록
+            if i % 2 == 0:  # 짝수 날은 감소
+                normal_data.loc[normal_data.index[idx], 'Volume'] = normal_data.iloc[idx-1]['Volume'] * 0.8
+            else:  # 홀수 날은 소폭 증가
+                normal_data.loc[normal_data.index[idx], 'Volume'] = normal_data.iloc[idx-1]['Volume'] * 1.1
+            
+            # %B 값 조정 - 상단밴드에 닿되 지나치게 높지 않게
+            # 3일 연속으로만 상단밴드에 닿게 설정 (마지막 3일)
+            if i >= 2:  # 마지막 3일
+                target_b = 0.82 + (i-2) * 0.03  # 0.82~0.88 범위
+                normal_data.loc[normal_data.index[idx], '%B'] = target_b
+                consecutive_touch_days += 1
+            else:
+                # 처음 2일은 상단밴드 근처지만 닿지 않음
+                normal_data.loc[normal_data.index[idx], '%B'] = 0.75
+            
+            # %B에 맞게 Close 가격 조정
+            mean = normal_data.loc[normal_data.index[idx], 'MA25']
+            std = normal_data.loc[normal_data.index[idx], 'STD']
+            b_value = normal_data.loc[normal_data.index[idx], '%B']
+            normal_data.loc[normal_data.index[idx], 'Close'] = mean + (b_value * 2 - 1) * 2 * std
             
             # 가격 등락 패턴 만들기 (강한 상승 추세가 아니도록)
-            if i % 2 == 0:
-                normal_data.loc[normal_data.index[idx], 'Close'] *= 0.98
+            if i % 2 == 0 and i > 0:
+                # 가격이 약간 하락하는 날 만들기 (강한 추세가 아님을 확실히)
+                normal_data.loc[normal_data.index[idx], 'Close'] = normal_data.iloc[idx-1]['Close'] * 0.985
+        
+        # 가격 변화 패턴 확인 - 상승일 비율이 70% 미만이어야 함
+        price_diffs = normal_data['Close'].pct_change().tail(5).dropna()
+        positive_pct = sum(1 for x in price_diffs if x > 0) / len(price_diffs)
+        
+        # 만약 상승일이 70% 이상이면 강제로 하락일 추가
+        if positive_pct >= 0.7:
+            for i in range(0, 5, 2):  # 0, 2, 4번째 날
+                idx = len(normal_data) - 5 + i
+                if idx > 0:
+                    normal_data.loc[normal_data.index[idx], 'Close'] = normal_data.iloc[idx-1]['Close'] * 0.99
+        
+        # 디버깅용 메시지 (테스트 시 사용)
+        # print(f"일반 밴드타기 데이터: 양봉 비율 {positive_pct * 100:.2f}%, 마지막 3일 %B 평균: {normal_data['%B'].tail(3).mean():.2f}")
         
         result = detect_band_riding(normal_data)
         
         # 밴드타기가 감지되어야 함
         self.assertTrue(result['is_riding'])
         
-        # 3일 이상 연속으로 상단밴드 접촉
-        self.assertGreaterEqual(result['consecutive_days'], 3)
+        # 연속 접촉일수 확인
+        self.assertEqual(result['consecutive_days'], consecutive_touch_days)
         
         # 강도가 중간 정도여야 함 (20-70% 사이)
         self.assertGreaterEqual(result['strength'], 20)
@@ -193,49 +232,89 @@ class TestBandRiding(unittest.TestCase):
         strong_data = self.strong_riding_data.copy()
         
         # 마지막 5일 동안 거래량 추가 증가 및 %B 값 증가
+        previous_volume = strong_data.iloc[len(strong_data)-6]['Volume']
         for i in range(5):
             idx = len(strong_data) - 5 + i
-            strong_data.loc[strong_data.index[idx], 'Volume'] = strong_data.iloc[idx-1]['Volume'] * 1.5
-            strong_data.loc[strong_data.index[idx], '%B'] = min(1.0, 0.9 + (i * 0.02))
+            # 지속적으로 증가하는 거래량 (이전 날 대비 30-50% 증가)
+            volume_increase_factor = 1.3 + (i * 0.05)  # 1.3x에서 1.5x로 점점 증가
+            new_volume = previous_volume * volume_increase_factor
+            strong_data.loc[strong_data.index[idx], 'Volume'] = new_volume
+            previous_volume = new_volume
             
-            # 높은 %B 값에 맞게 Close 가격 조정
+            # 높은 %B 값 설정
+            target_b = min(0.95 + (i * 0.01), 0.99)  # 0.95에서 0.99까지 (1.0은 극단적일 수 있어 피함)
+            strong_data.loc[strong_data.index[idx], '%B'] = target_b
+            
+            # %B 값에 맞게 Close 가격 조정
             mean = strong_data.loc[strong_data.index[idx], 'MA25']
             std = strong_data.loc[strong_data.index[idx], 'STD']
-            b_value = strong_data.loc[strong_data.index[idx], '%B']
-            strong_data.loc[strong_data.index[idx], 'Close'] = mean + (b_value * 2 - 1) * 2 * std
+            strong_data.loc[strong_data.index[idx], 'Close'] = mean + (target_b * 2 - 1) * 2 * std
+            
+            # 지속적인 가격 상승 보장 (이전 날 대비 1-3% 상승)
+            if i > 0:
+                prev_close = strong_data.iloc[idx-1]['Close']
+                price_increase = prev_close * (1.01 + (i * 0.005))  # 1%에서 최대 3%까지 증가율 상승
+                strong_data.loc[strong_data.index[idx], 'Close'] = max(strong_data.iloc[idx]['Close'], price_increase)
         
-        # 가격이 지속적으로 상승하도록 조정
-        price_diffs = strong_data['Close'].pct_change().dropna()
-        positive_pct = sum(1 for x in price_diffs.tail(5) if x > 0) / 5
+        # 가격 상승 연속성 확인
+        price_diffs = strong_data['Close'].pct_change().tail(5).dropna()
+        positive_pct = sum(1 for x in price_diffs if x > 0) / len(price_diffs)
         
-        # 추가 조정이 필요한 경우
-        if positive_pct < 0.7:
-            for i in range(4):
-                idx = len(strong_data) - 5 + i
-                next_idx = idx + 1
-                if next_idx < len(strong_data):
-                    strong_data.loc[strong_data.index[next_idx], 'Close'] = strong_data.iloc[idx]['Close'] * 1.02
+        # 디버깅용 메시지 (테스트 시 사용)
+        # print(f"강한 밴드타기 데이터: 양봉 비율 {positive_pct * 100:.2f}%, 마지막 5일 거래량 증가율: {(strong_data['Volume'].iloc[-1] / strong_data['Volume'].iloc[-6]) * 100:.2f}%")
         
         result = detect_band_riding(strong_data)
         
         # 밴드타기가 감지되어야 함
         self.assertTrue(result['is_riding'])
         
-        # 3일 이상 연속으로 상단밴드 접촉
-        self.assertGreaterEqual(result['consecutive_days'], 3)
+        # 5일 연속으로 상단밴드 접촉
+        self.assertEqual(result['consecutive_days'], 5)
         
         # 강도가 높아야 함 (70% 이상)
         self.assertGreaterEqual(result['strength'], 70)
+        
+        # 강한 추세가 감지되어야 함
+        self.assertTrue(result['is_strong_trend'])
+        
+        # 추세 메시지가 있어야 함
+        self.assertTrue("강한 상승 추세" in result['trend_message'])
     
     def test_weak_band_riding_detection(self):
         """약한 밴드타기 감지 테스트"""
-        result = detect_band_riding(self.weak_riding_data)
+        # 약한 밴드타기 데이터 추가 조정
+        weak_data = self.weak_riding_data.copy()
         
-        # 약한 밴드타기는 감지되지 않아야 함 (%B가 0.8 미만이므로)
+        # 최근 5일의 데이터가 연속적으로 상단밴드에 닿지 않도록 조정
+        touch_count = 0
+        for i in range(5):
+            idx = len(weak_data) - 5 + i
+            
+            # 약한 밴드타기에서 일부 날은 상단밴드에 거의 닿게, 일부는 멀게 배치
+            if i == 1 or i == 3:  # 비연속적인 날에만 높은 %B
+                weak_data.loc[weak_data.index[idx], '%B'] = 0.82
+                touch_count += 1
+                # 상단밴드에 닿는 날에도 거래량은 적게 유지
+                weak_data.loc[weak_data.index[idx], 'Volume'] = weak_data.iloc[idx-1]['Volume'] * 0.9
+            else:
+                weak_data.loc[weak_data.index[idx], '%B'] = 0.55 + (i * 0.03)
+            
+            # %B에 맞게 Close 가격 조정
+            mean = weak_data.loc[weak_data.index[idx], 'MA25']
+            std = weak_data.loc[weak_data.index[idx], 'STD']
+            b_value = weak_data.loc[weak_data.index[idx], '%B']
+            weak_data.loc[weak_data.index[idx], 'Close'] = mean + (b_value * 2 - 1) * 2 * std
+        
+        result = detect_band_riding(weak_data)
+        
+        # 연속 3일 이상 상단밴드 접촉이 없어야 함
+        self.assertLess(result['consecutive_days'], 3)
+        
+        # 약한 밴드타기는 밴드타기로 감지되지 않아야 함
         self.assertFalse(result['is_riding'])
         
-        # 연속 일수가 적어야 함
-        self.assertLess(result['consecutive_days'], 3)
+        # 정확히 2번 상단밴드 접촉 확인 (실제 구현과 비교)
+        self.assertEqual(result['consecutive_days'], touch_count)
     
     def test_no_band_riding(self):
         """밴드타기가 없는 데이터 테스트"""

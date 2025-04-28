@@ -104,6 +104,20 @@ def calculate_mfi(df, period=MFI_PERIOD):
     
     return df
 
+def calculate_sma_200(df):
+    """
+    200일 단순 이동평균(SMA 200)을 계산합니다.
+    
+    Args:
+        df (pandas.DataFrame): 주식 데이터
+        
+    Returns:
+        pandas.DataFrame: SMA 200이 추가된 데이터
+    """
+    df = df.copy()
+    df['SMA200'] = df['Close'].rolling(window=200).mean()
+    return df
+
 def add_all_indicators(df):
     """
     모든 기술적 지표를 데이터프레임에 추가합니다.
@@ -116,4 +130,5 @@ def add_all_indicators(df):
     """
     df = calculate_bollinger_bands(df)
     df = calculate_mfi(df)
+    df = calculate_sma_200(df)
     return df 

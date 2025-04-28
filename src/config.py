@@ -23,6 +23,9 @@ else:
     print("1. .env 파일에 SLACK_WEBHOOK_URL 환경 변수 추가")
     print("2. --webhook 옵션을 사용하여 실행 시 URL 제공")
 
+# .env에서 언어 설정 로드 (기본값: 한국어)
+LANGUAGE = os.getenv('LANGUAGE', 'en')
+
 # 설정 클래스
 class Config:
     # 주식 관련 설정 (기본값)
@@ -48,6 +51,9 @@ class Config:
     # 목표 수익률 관련 설정
     PURCHASE_PRICE = None  # 구매가
     TARGET_GAIN_PERCENT = None  # 목표 수익률 (%)
+    
+    # 언어 설정 (ko: 한국어, en: 영어)
+    LANGUAGE = LANGUAGE
 
 # 설정 객체 생성
 config = Config()
@@ -64,6 +70,7 @@ BUY_B_THRESHOLD = config.BUY_B_THRESHOLD
 BUY_MFI_THRESHOLD = config.BUY_MFI_THRESHOLD
 SELL_B_THRESHOLD = config.SELL_B_THRESHOLD
 SELL_MFI_THRESHOLD = config.SELL_MFI_THRESHOLD
+LANGUAGE = config.LANGUAGE
 
 # 티커 설정 함수
 def set_ticker(ticker):
@@ -135,4 +142,25 @@ def set_webhook_url(url):
     SLACK_WEBHOOK_URL = url
     
     print(f"Slack 웹훅 URL이 설정되었습니다.")
-    return url 
+    return url
+
+# 언어 설정 함수
+def set_language(lang_code):
+    """
+    시스템 언어를 설정합니다.
+    
+    Args:
+        lang_code (str): 언어 코드 ('ko': 한국어, 'en': 영어)
+    """
+    if lang_code not in ['ko', 'en']:
+        print(f"지원되지 않는 언어 코드입니다: {lang_code}. 기본값인 'ko'를 사용합니다.")
+        lang_code = 'ko'
+    
+    config.LANGUAGE = lang_code
+    
+    # 전역 변수도 업데이트
+    global LANGUAGE
+    LANGUAGE = lang_code
+    
+    print(f"언어가 {lang_code}로 설정되었습니다. ({'한국어' if lang_code == 'ko' else '영어'})")
+    return lang_code 

@@ -1,73 +1,73 @@
-# 볼린저 밴드 전략 요약
+# Bollinger Bands Strategy Summary
 
-## 볼린저 밴드 지표 개요
-볼린저 밴드는 주가의 이동평균선(MA)을 중심으로 표준편차를 이용해 상단밴드와 하단밴드를 그려 가격 변동성을 시각화하는 지표입니다. 이 시스템에서는 25일 이동평균선(MA25)과 2배 표준편차를 사용합니다.
+## Bollinger Bands Indicator Overview
+Bollinger Bands are indicators that visualize price volatility by drawing upper and lower bands using standard deviation around a moving average (MA) of the stock price. This system uses a 25-day moving average (MA25) and 2x standard deviation.
 
-## %B 지표
-%B 지표는 현재 가격이 밴드 내에서 어디에 위치하는지 나타내는 값입니다:
-- 0 = 하단밴드에 위치
-- 0.5 = 중심선(MA25)에 위치
-- 1 = 상단밴드에 위치
-- 1 초과 또는 0 미만 = 밴드를 벗어난 강한 움직임
+## %B Indicator
+The %B indicator shows where the current price is positioned within the bands:
+- 0 = Located at the lower band
+- 0.5 = Located at the centerline (MA25)
+- 1 = Located at the upper band
+- Greater than 1 or less than 0 = Strong movement beyond the bands
 
-## BNF 볼린저 밴드 매매 전략
+## BNF Bollinger Bands Trading Strategy
 
-### 매수 신호 유형
-1. **Buy_Strong (강한 매수 신호)**
-   - MA25 대비 20% 이상 하락
-   - %B < 0.2 (과매도 상태)
-   - 급락 후 반등 시점에 매수
+### Buy Signal Types
+1. **Buy_Strong (Strong Buy Signal)**
+   - 20%+ decline from MA25
+   - %B < 0.2 (oversold condition)
+   - Buy at the point of rebound after a sharp decline
 
-2. **Buy (일반 매수 신호)**
-   - MA25 대비 15% 하락
+2. **Buy (Regular Buy Signal)**
+   - 15% decline from MA25
    - %B < 0.3
-   - MFI < 30 (자금 유출)
-   - 1차 반등이 시작된 시점에 매수
+   - MFI < 30 (capital outflow)
+   - Buy at the point when the first rebound begins
 
-3. **Breakout_Buy (돌파 매수 신호)**
-   - 밴드 폭 축소(스퀴즈) 후 상단 돌파
-   - 거래량 증가 동반
-   - 강한 상승 추세의 시작을 의미
+3. **Breakout_Buy (Breakout Buy Signal)**
+   - Upper band breakout after band squeeze
+   - Accompanied by volume increase
+   - Indicates the beginning of a strong uptrend
 
-### 매도 신호
-1. **Sell (매도 신호)**
-   - MA25 대비 10% 이상 상승
-   - %B > 0.8 (과매수 상태)
-   - MFI > 70 (과도한 자금 유입)
-   - 고점 형성 가능성이 높은 시점
+### Sell Signals
+1. **Sell (Sell Signal)**
+   - 10%+ rise from MA25
+   - %B > 0.8 (overbought condition)
+   - MFI > 70 (excessive capital inflow)
+   - High probability of top formation
 
-2. **Target_Reached (목표가 도달)**
-   - 설정한 구매가 대비 목표 수익률 달성 시
+2. **Target_Reached (Target Price Reached)**
+   - When target return compared to set purchase price is achieved
 
-## 실전 매매 전략
+## Practical Trading Strategy
 
-### 분할 매수 전략
-- 하단밴드 터치 시 20-30% 자금으로 첫 매수
-- 추가 하락 시 평균단가 낮추기
-- 중심선(MA25) 도달 시 50% 익절 고려
-- 중심선 돌파 확인 후 남은 물량 유지
+### Split Purchase Strategy
+- First purchase with 20-30% of funds when touching the lower band
+- Lower average cost on additional decline
+- Consider 50% profit-taking when reaching the centerline (MA25)
+- Maintain remaining position after confirming centerline breakout
 
-### 손절 전략
-- 돌파 매매의 경우: 밴드 상단선 아래로 내려올 때 손절
-- 하단 매수의 경우: 추가 하락으로 평균단가 낮추기
+### Stop-Loss Strategy
+- For breakout trading: Stop loss when price falls below the upper band
+- For lower band purchases: Lower average cost on additional decline
 
-### 밴드 타기 현상
-- 강한 상승 추세에서는 주가가 밴드 상단을 따라 상승
-- 이 경우 상단 접촉만으로 매도하지 않고 추세 지속 관찰
+### Band Riding Phenomenon
+- In strong uptrends, prices move along the upper band
+- In this case, observe trend continuation rather than selling solely based on upper band touch
 
-## 위험 관리
-- 분할 매매로 리스크 분산
-- 매수/매도 시점에 MFI 지표 병행 확인
-- 추세 변화 시 신속한 대응 (밴드 기울기 변화 주시)
-- 목표 수익률 도달 시 일부 이익 실현
+## Risk Management
+- Risk distribution through split trading
+- Concurrent verification with MFI indicator at buy/sell points
+- Quick response to trend changes (monitor band slope changes)
+- Partial profit realization when target return is reached
 
-## 알림 시스템
-시스템은 다음 조건에서 Slack을 통해 알림을 제공합니다:
-- 기술적 매수/매도 신호 발생 시
-- 목표 수익률 도달 시
-- 강제 알림 요청 시
+## Notification System
+The system provides notifications via Slack under the following conditions:
+- When technical buy/sell signals occur
+- When target return is reached
+- Upon forced notification request
 
-## 지표 임계값 설정
+## Indicator Threshold Settings
 - BUY_B_THRESHOLD = 0.2
 - BUY_MFI_THRESHOLD = 20
 - SELL_B_THRESHOLD = 0.8

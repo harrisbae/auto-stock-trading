@@ -5,7 +5,8 @@ from src.stock_data import get_stock_data
 from src.indicators import add_all_indicators
 from src.signal import generate_trading_signal
 from src.notification import send_slack_message, send_slack_formatted_message
-from src.config import set_ticker, set_webhook_url, set_target_params, DEFAULT_TICKER, config
+from src.config import set_ticker, set_webhook_url, set_target_params, DEFAULT_TICKER, config, set_language
+from src.translation import get_translation, translate_signal, translate_reason
 
 """
 # 볼린저 밴드 기반 실전 매매 전략
@@ -144,6 +145,8 @@ def detect_band_riding(df, lookback=5):
         "is_riding": False,
         "consecutive_days": 0,
         "strength": 0,
+        "intensity": 0,  # 밴드 타기 강도 추가
+        "trailing_stop_value": 0,  # 트레일링 스탑 값 추가
         "message": "",
         "is_strong_trend": False,
         "trend_message": ""
@@ -164,6 +167,16 @@ def detect_band_riding(df, lookback=5):
         avg_b = upper_band_touches['%B'].mean()
         result["strength"] = round(min(100, (avg_b - 0.8) * 500))
         
+        # 밴드 타기 강도 계산 (추가 지표)
+        # 상단 밴드 접촉 비율과 %B 평균값을 고려한 강도 측정
+        touch_ratio = result["consecutive_days"] / lookback
+        result["intensity"] = round(min(100, touch_ratio * 100 * avg_b))
+        
+        # 트레일링 스탑 값 계산 (현재 가격의 10%)
+        if len(recent_df) > 0:
+            current_price = recent_df['Close'].iloc[-1]
+            result["trailing_stop_value"] = round(current_price * 0.9, 2)  # 10% 트레일링 스탑
+        
         # 최근 볼륨 확인 (거래량 증가는 추세 강도 확인에 중요)
         volume_increase = False
         if 'Volume' in recent_df.columns:
@@ -179,7 +192,7 @@ def detect_band_riding(df, lookback=5):
             price_trend = sum(1 for x in price_diff if x > 0) / len(price_diff)
         
         # 기본 밴드타기 메시지 초기화
-        result["message"] = f"밴드타기 감지: {result['consecutive_days']}일 연속 상단밴드 접촉 (강도: {result['strength']}%)"
+        result["message"] = f"밴드타기 감지: {result['consecutive_days']}일 연속 상단밴드 접촉 (강도: {result['strength']}%, 강도지수: {result['intensity']})"
         
         # 강한 상승 추세로 판단 (가격 상승일이 70% 이상이고 거래량 증가 또는 %B가 매우 높음)
         if (price_trend >= 0.7 and (volume_increase or avg_b > 0.9)):
@@ -189,10 +202,10 @@ def detect_band_riding(df, lookback=5):
             
             # 강한 추세일 때는 매도보다는 추세 추종 메시지
             result["message"] += f"\n- 강한 상승 추세 유지 중: 상단 접촉만으로 매도하지 말고 추세 모멘텀 활용"
-            result["message"] += f"\n- 트레일링 스탑(Trailing Stop) 전략으로 이익 보호하며 추세 추종"
+            result["message"] += f"\n- 트레일링 스탑(Trailing Stop) 전략으로 이익 보호하며 추세 추종 - 추천 스탑: ${result['trailing_stop_value']}"
         else:
             result["message"] += f"\n- 상단밴드에 지속 접촉 시 밴드 타기 현상 주시"
-            
+            result["message"] += f"\n- 트레일링 스탑 권장: ${result['trailing_stop_value']} (현재가의 90%)"
             result["message"] += f"\n- 중심선(MA25) 아래로 돌파 시 잔여 물량 매도 고려"
     
     return result
@@ -471,7 +484,7 @@ def adjust_risk_management(risk_level, b_value, dev_percent, stop_loss_percent=7
     return result
 
 def check_trading_signal(ticker=None, notify_method='json_body', tranche_count=3, stop_loss_percent=7, 
-                        band_riding_detection=True, risk_management_level="medium"):
+                        band_riding_detection=True, risk_management_level="medium", use_mfi_filter=False, force_notify=False):
     """
     주식 데이터를 가져와 신호를 체크하고 필요시 알림을 보냅니다.
     
@@ -479,399 +492,323 @@ def check_trading_signal(ticker=None, notify_method='json_body', tranche_count=3
         ticker (str, optional): 분석할 주식 종목 티커 심볼
         notify_method (str): Slack 알림 전송 방식
         tranche_count (int): 분할 매수 단계 수
-        stop_loss_percent (float): 손절 비율
+        stop_loss_percent (float): 손절 비율 (%)
         band_riding_detection (bool): 밴드타기 감지 여부
         risk_management_level (str): 위험 관리 수준 (low, medium, high)
+        use_mfi_filter (bool): MFI 필터 사용 여부
+        force_notify (bool): 매매 신호가 없어도 알림을 강제로 보냄
     """
-    # 주식 종목 설정
+    # 티커 정보 추출 및 설정
+    actual_ticker = None
     if ticker:
-        current_ticker = set_ticker(ticker)
-        print(f"분석할 주식 종목: {current_ticker}")
-    
-    # 주식 데이터 가져오기
-    df = get_stock_data()
-    if df is None:
-        print("주식 데이터를 가져오는데 실패했습니다.")
-        return
-    
-    # 지표 계산
-    df = add_all_indicators(df)
-    
-    # 매매 신호 생성
-    result = generate_trading_signal(df)
-    
-    # 기본 데이터 가져오기
-    b_value = result["data"].get("b_value", 0.5)
-    dev_percent = result["data"].get("deviation_percent", 0)
-    
-    # 추가 데이터 추출
-    mfi = None
-    if 'MFI' in df.columns:
-        mfi = df['MFI'].iloc[-1]
-        result["data"]["mfi"] = mfi
-    
-    # 밴드 기울기 계산
-    band_slope = None
-    if 'upperband' in df.columns and len(df) > 5:
-        # 최근 5일간의 상단밴드 기울기 계산
-        recent_upper = df['upperband'].tail(5).values
-        if len(recent_upper) >= 2:
-            band_slope = (recent_upper[-1] - recent_upper[0]) / (len(recent_upper) * recent_upper[0])
-            result["data"]["band_slope"] = band_slope
-    
-    # 현재 수익률 및 목표 수익률 가져오기
-    current_gain = None
-    target_gain = None
-    if hasattr(config, 'PURCHASE_PRICE') and config.PURCHASE_PRICE is not None:
-        current_price = df['Close'].iloc[-1] if not df.empty else None
-        if current_price is not None:
-            current_gain = ((current_price / config.PURCHASE_PRICE) - 1) * 100
-            result["data"]["current_gain"] = current_gain
+        # ticker가 "SPY/508.62/10" 형태로 들어오는 경우 티커만 추출
+        if '/' in ticker:
+            parts = ticker.split('/')
+            actual_ticker = parts[0].strip()  # 앞뒤 공백 제거
             
-        if hasattr(config, 'TARGET_GAIN_PERCENT'):
-            target_gain = config.TARGET_GAIN_PERCENT
-            result["data"]["target_gain"] = target_gain
-    
-    # 돌파 매매 여부 확인 (신호가 'Breakout_Buy'인 경우)
-    is_breakout = result["data"]["signal"] == "Breakout_Buy" if "signal" in result["data"] else False
-    
-    # 추가 전략 계산
-    tranche_strategy = calculate_tranche_strategy(b_value, dev_percent, tranche_count)
-    risk_strategy = adjust_risk_management(
-        risk_management_level, b_value, dev_percent, stop_loss_percent, is_breakout,
-        mfi=mfi, band_slope=band_slope, current_gain=current_gain, target_gain=target_gain
-    )
-    
-    # 밴드타기 감지 (옵션이 켜져 있을 경우)
-    band_riding_info = {"is_riding": False, "message": ""}
-    if band_riding_detection:
-        band_riding_info = detect_band_riding(df)
-    
-    # Hold 신호일 경우 매수/매도 확률 계산
-    if result["data"]["signal"] == "Hold":
-        buy_prob, sell_prob = calculate_trading_probability(b_value, dev_percent)
-        
-        # 기존 메시지에 매수/매도 확률 정보 추가
-        result["message"] += f"\n매수 확률: {buy_prob}%, 매도 확률: {sell_prob}%"
-        
-        # 데이터에도 확률 정보 추가
-        result["data"]["buy_probability"] = buy_prob
-        result["data"]["sell_probability"] = sell_prob
-        
-        # 실전 매매 전략 추천 메시지 추가
-        if buy_prob >= 30:
-            result["message"] += f"\n\n[매수 전략 추천]"
-            result["message"] += f"\n- 현재 매수 확률 {buy_prob}%로 분할 매수 고려 가능"
+            # 디버깅: 분리된 티커 정보 출력
+            print(f"티커 정보 파싱: {ticker} -> 티커={actual_ticker}, 가격={parts[1] if len(parts) > 1 else '없음'}")
             
-            # 분할 매수 전략 정보 추가
-            if tranche_strategy["current_tranche"] > 0:
-                result["message"] += f"\n- {tranche_strategy['strategy_message']}"
-            else:
-                result["message"] += f"\n- 하단밴드 터치 시 총 자금의 20-30%로 첫 매수 진입 검토"
-            
-            # 위험 관리 전략 정보 추가
-            result["message"] += f"\n- {risk_strategy['strategy_message']}"
-            
-            # 손절 전략 추가
-            result["message"] += f"\n- {risk_strategy['stop_loss_strategy']}"
-            
-        elif sell_prob >= 30:
-            result["message"] += f"\n\n[매도 전략 추천]"
-            result["message"] += f"\n- 현재 매도 확률 {sell_prob}%로 분할 이익실현 고려"
-            
-            # 위험 관리 전략 정보 추가
-            result["message"] += f"\n- {risk_strategy['strategy_message']}"
-            
-            # 밴드타기 감지 정보 추가
-            if band_riding_info["is_riding"]:
-                result["message"] += f"\n- {band_riding_info['message']}"
-                
-                # 강한 상승 추세에서는 매도 권장을 수정
-                if band_riding_info["is_strong_trend"]:
-                    result["message"] += f"\n- 강한 상승 추세 유지 중: 상단 접촉만으로 매도하지 말고 추세 모멘텀 활용"
-                    result["message"] += f"\n- 트레일링 스탑(Trailing Stop) 전략으로 이익 보호하며 추세 추종"
-            else:
-                result["message"] += f"\n- 상단밴드에 지속 접촉 시 밴드 타기 현상 주시"
-            
-            result["message"] += f"\n- 중심선(MA25) 아래로 돌파 시 잔여 물량 매도 고려"
-        
-        # 익절 전략 정보 추가 (b_value가 0.45 이상일 때)
-        if b_value >= 0.45 and tranche_strategy["exit_strategy"]:
-            result["message"] += f"\n\n[익절 전략 추천]"
-            result["message"] += f"\n- {tranche_strategy['exit_strategy']}"
-    
-    # 돌파 매매 신호인 경우 손절 전략 추가
-    elif is_breakout:
-        result["message"] += f"\n\n[돌파 매매 손절 전략]"
-        result["message"] += f"\n- {risk_strategy['stop_loss_strategy']}"
-    
-    # 위험 관리 세부 전략 추가
-    if risk_strategy["risk_management"]:
-        result["message"] += f"\n\n[위험 관리 전략]"
-        for strategy in risk_strategy["risk_management"]:
-            result["message"] += f"\n- {strategy}"
-    
-    # 밴드타기 감지 정보 추가 (매수/매도 확률과 관계없이 밴드타기가 감지된 경우)
-    if band_riding_detection and band_riding_info["is_riding"] and band_riding_info["message"] not in result["message"]:
-        result["message"] += f"\n\n[밴드타기 감지]\n{band_riding_info['message']}"
-        result["data"]["band_riding"] = band_riding_info
-    
-    # 분할 매수 및 위험 관리 데이터 추가
-    result["data"]["tranche_strategy"] = tranche_strategy
-    result["data"]["risk_management"] = risk_strategy
-    
-    # 결과 출력
-    print(result["message"])
-    
-    # 알림을 보내야 하는 조건
-    should_notify = False
-    
-    # 기술적 신호와 목표가 신호 확인
-    if "technical_signal" in result["data"] and "target_signal" in result["data"]:
-        # 기술적 신호가 Buy 또는 Sell이거나 목표가 신호가 Target_Reached인 경우 알림
-        should_notify = (
-            result["data"]["technical_signal"] in ["Buy", "Sell"] or  # 기술적 지표 기반 매수/매도 신호
-            result["data"]["target_signal"] == "Target_Reached"  # 목표 수익률 달성
-        )
-    else:
-        # 이전 버전 호환성을 위한 코드
-        if "target_reached" in result["data"]:
-            should_notify = (
-                result["signal"] in ["Buy", "Sell", "Target_Reached"] or  # 매수/매도/목표수익률 신호
-                result["data"]["target_reached"]  # 목표 수익률 달성
-            )
+            # 설정
+            current_ticker = set_ticker(actual_ticker)
         else:
-            should_notify = result["signal"] in ["Buy", "Sell"]  # 매수/매도 신호만
-    
-    # 매수/매도 확률이 높은 경우에도 알림 (30% 이상)
-    if result["data"]["signal"] == "Hold" and ("buy_probability" in result["data"] or "sell_probability" in result["data"]):
-        buy_prob = result["data"].get("buy_probability", 0)
-        sell_prob = result["data"].get("sell_probability", 0)
-        if buy_prob >= 40 or sell_prob >= 40:
-            should_notify = True
-    
-    # 밴드타기가 감지된 경우 알림
-    if band_riding_detection and band_riding_info["is_riding"] and band_riding_info["strength"] > 50:
-            should_notify = True
-    
-    # 조건에 맞으면 Slack 알림 전송
-    if should_notify:
-        send_slack_message(result["message"], method=notify_method)
+            actual_ticker = ticker.strip()  # 앞뒤 공백 제거
+            current_ticker = set_ticker(actual_ticker)
     else:
-        print("현재 특별한 신호 없음. Slack 알림을 보내지 않습니다.")
+        current_ticker = DEFAULT_TICKER
+        actual_ticker = current_ticker
     
-    return result
-
-def run_scheduler(ticker=None, notify_method='json_body', tranche_count=3, stop_loss_percent=7, 
-                 band_riding_detection=True, risk_management_level="medium"):
-    """
-    스케줄러를 설정하고 실행합니다.
-    
-    Args:
-        ticker (str, optional): 분석할 주식 종목 티커 심볼
-        notify_method (str): Slack 알림 전송 방식
-        tranche_count (int): 분할 매수 단계 수
-        stop_loss_percent (float): 손절 비율
-        band_riding_detection (bool): 밴드타기 감지 여부
-        risk_management_level (str): 위험 관리 수준 (low, medium, high)
-    """
-    # 주식 종목 설정 (스케줄링 전에 미리 설정)
-    if ticker:
-        current_ticker = set_ticker(ticker)
-        print(f"분석할 주식 종목: {current_ticker}")
-    
-    # 메서드 전달을 위한 래퍼 함수
-    def scheduled_check():
-        # 설정된 파라미터를 재사용하여 호출
-        check_trading_signal(
-            notify_method=notify_method,
-            tranche_count=tranche_count,
-            stop_loss_percent=stop_loss_percent,
-            band_riding_detection=band_riding_detection,
-            risk_management_level=risk_management_level
-        )
-    
-    # 평일 장 마감 후(한국 시간 기준 다음날 오전 6시) 매일 실행
-    schedule.every().day.at("06:00").do(scheduled_check)
-    
-    print("주식 거래 신호 모니터링 시작...")
-    print("매일 오전 6시에 자동으로 확인합니다.")
-    if hasattr(config, 'PURCHASE_PRICE') and config.PURCHASE_PRICE is not None:
-        target_price = config.PURCHASE_PRICE * (1 + config.TARGET_GAIN_PERCENT / 100)
-        print(f"구매가: ${config.PURCHASE_PRICE:.2f}, 목표 수익률: {config.TARGET_GAIN_PERCENT:.2f}%")
-        print(f"목표 가격: ${target_price:.2f}")
-    
-    # 분할 매수 및 위험 관리 정보 출력
-    print(f"분할 매수 전략: 총 {tranche_count}단계")
-    print(f"손절 비율: {stop_loss_percent}%")
-    print(f"밴드타기 감지: {'활성화' if band_riding_detection else '비활성화'}")
-    print(f"위험 관리 수준: {risk_management_level}")
-    
-    print("Ctrl+C를 눌러 종료할 수 있습니다.")
+    # 티커 확인 (디버깅)
+    print(f"분석 진행: ticker={ticker}, actual_ticker={actual_ticker}, current_ticker={current_ticker}")
     
     try:
+        # 주식 데이터 가져오기 - 실제 티커 명시적 전달
+        stock_data_raw = get_stock_data(actual_ticker)
+        
+        if stock_data_raw.empty:
+            print(f"주식 데이터를 가져오는 데 실패했습니다. 종목: {actual_ticker}")
+            return
+        
+        # 데이터 확인 (디버깅)
+        print(f"데이터 로드 성공: {actual_ticker}, 행 수={len(stock_data_raw)}")
+        
+        # 기술적 지표 추가
+        stock_data = add_all_indicators(stock_data_raw)
+        
+        # 거래 신호 생성
+        trading_signal = generate_trading_signal(stock_data, use_mfi_filter=use_mfi_filter)
+        
+        # 거래 신호 결과
+        signal = trading_signal['signal']
+        message = trading_signal['message']
+        
+        # 나머지 파라미터 추가
+        if 'params' not in trading_signal['data']:
+            trading_signal['data']['params'] = {}
+        
+        trading_signal['data']['params'].update({
+            'tranche_count': tranche_count,
+            'stop_loss_percent': stop_loss_percent,
+            'band_riding_detection': band_riding_detection,
+            'risk_management_level': risk_management_level,
+        })
+        
+        # 밴드타기 감지 (옵션에 따라 활성화)
+        if band_riding_detection:
+            band_riding_result = detect_band_riding(stock_data)
+            
+            if band_riding_result['is_riding']:
+                trading_signal['data']['band_riding'] = band_riding_result
+                
+                # 밴드타기 메시지 추가
+                message += f"\n\n[밴드타기 감지]\n{band_riding_result['message']}"
+                
+                if band_riding_result['is_strong_trend'] and band_riding_result['trend_message']:
+                    message += f"\n{band_riding_result['trend_message']}"
+                
+                # 강한 상승 추세가 아닌 경우 매도 고려 메시지 추가
+                if signal != "Sell" and not band_riding_result['is_strong_trend']:
+                    message += "\n\n⚠️ 밴드타기 현상이 감지되었으나 강한 추세는 아닙니다. 부분 매도를 고려하세요."
+                
+                # 강한 추세로 판단되면 메시지 조정
+                if signal == "Sell" and band_riding_result['is_strong_trend']:
+                    message += "\n\n⚠️ 매도 신호가 발생했으나, 강한 상승 추세로 판단됩니다. 트레일링 스탑을 고려하세요."
+                    # 신호를 Hold로 변경하지 않고 사용자 판단에 맡김
+        
+        # 위험 관리 전략 적용
+        current_price = stock_data['Close'].iloc[-1]
+        current_b_value = stock_data['%B'].iloc[-1]
+        current_dev_percent = ((current_price / stock_data['MA25'].iloc[-1]) - 1) * 100
+        
+        # MFI 값 가져오기
+        mfi_value = None
+        if 'MFI' in stock_data.columns:
+            mfi_value = stock_data['MFI'].iloc[-1]
+        
+        # 밴드 기울기 계산
+        band_slope = None
+        if len(stock_data) >= 5:
+            recent_upper = stock_data['UpperBand'].iloc[-5:].values
+            band_slope = (recent_upper[-1] - recent_upper[0]) / recent_upper[0] * 100
+        
+        # 현재 이득 계산
+        current_gain = None
+        if hasattr(config, 'PURCHASE_PRICE') and config.PURCHASE_PRICE is not None:
+            current_gain = ((current_price / config.PURCHASE_PRICE) - 1) * 100
+        
+        # 목표 이득 설정
+        target_gain = None
+        if hasattr(config, 'TARGET_GAIN_PERCENT'):
+            target_gain = config.TARGET_GAIN_PERCENT
+        
+        # 돌파 매매 확인 (중심선 위에서 신호가 발생한 경우)
+        is_breakout = current_b_value > 0.5
+        
+        # 위험 관리 전략 계산
+        risk_strategy = adjust_risk_management(
+            risk_level=risk_management_level,
+            b_value=current_b_value,
+            dev_percent=current_dev_percent,
+            stop_loss_percent=stop_loss_percent,
+            is_breakout=is_breakout,
+            mfi=mfi_value,
+            band_slope=band_slope,
+            current_gain=current_gain,
+            target_gain=target_gain
+        )
+        
+        # 위험 관리 전략을 데이터에 추가
+        trading_signal['data']['risk_management'] = risk_strategy
+        
+        # 신호 근거 추가
+        if trading_signal.get('reason') is None:
+            # 기본 근거 메시지 설정
+            if signal == "Buy":
+                reason = f"매수 신호: %B({current_b_value:.4f})가 하단밴드 근처에 위치하고"
+                if mfi_value is not None and mfi_value < 30:
+                    reason += f", MFI({mfi_value:.2f})가 과매도 상태로"
+                if current_dev_percent < 0:
+                    reason += f", 이격도({current_dev_percent:.2f}%)가 음수"
+                reason += "로 매수 포인트로 판단됩니다."
+            elif signal == "Sell":
+                reason = f"매도 신호: %B({current_b_value:.4f})가 상단밴드 근처에 위치하고"
+                if mfi_value is not None and mfi_value > 70:
+                    reason += f", MFI({mfi_value:.2f})가 과매수 상태로"
+                if current_dev_percent > 0:
+                    reason += f", 이격도({current_dev_percent:.2f}%)가 양수"
+                reason += "로 매도 포인트로 판단됩니다."
+            elif signal == "Watch":
+                reason = "관망 신호: "
+                if current_b_value > 0.5:
+                    reason += f"%B({current_b_value:.4f})가 중심선 위에 위치하여 상승 추세 관찰 중"
+                    if use_mfi_filter and mfi_value is not None and mfi_value < 70:
+                        reason += f", MFI({mfi_value:.2f})가 과매수 상태가 아니어서 매도 신호가 억제됨"
+                else:
+                    reason += f"%B({current_b_value:.4f})가 중심선 아래에 위치하여 하락 추세 관찰 중"
+                    if use_mfi_filter and mfi_value is not None and mfi_value > 30:
+                        reason += f", MFI({mfi_value:.2f})가 과매도 상태가 아니어서 매수 신호가 억제됨"
+            else:
+                reason = "매매 신호는 %B 값, 이격도, MFI 지표를 종합적으로 분석한 결과입니다."
+                
+            trading_signal['reason'] = reason
+        
+        # 결과 출력
+        print(message)
+        
+        # Slack 알림 전송
+        formatted_message = f"""
+📈 *[{actual_ticker} 거래 신호: {signal}]*
+{trading_signal.get('reason', '매매 신호는 %B 값, 이격도, MFI 지표를 종합적으로 분석한 결과입니다.')}
+
+*[주요 지표]*
+• 현재 가격: ${current_price:.2f}"""
+
+        if hasattr(config, 'PURCHASE_PRICE') and config.PURCHASE_PRICE is not None:
+            formatted_message += f"\n• 구매 가격: ${config.PURCHASE_PRICE:.2f}"
+            
+        formatted_message += f"""
+• %B 값: {current_b_value:.4f}
+• 이격도: {current_dev_percent:.2f}%"""
+
+        if mfi_value is not None:
+            formatted_message += f"\n• MFI: {mfi_value:.2f}"
+            
+        if current_gain is not None:
+            formatted_message += f"\n• 현재 수익률: {current_gain:.2f}%"
+        
+        formatted_message += "\n\n*[전략 조언]*"
+        
+        # 메시지에서 주요 조언 포인트 추출하여 불릿 포인트로 표시
+        advice_points = []
+        
+        if current_b_value > 0.8:
+            advice_points.append("☑️ 상단밴드 접근 시 분할 매도 전략 추천")
+            advice_points.append(f"☑️ 첫 매도는 보유 물량의 {risk_strategy.get('first_portion', 30)}-50%로 이익 실현")
+            if current_dev_percent > 10:
+                advice_points.append(f"☑️ 이격도 {current_dev_percent:.2f}%로 과매수 상태, 조정 가능성 주의")
+        elif current_b_value < 0.2:
+            advice_points.append("☑️ 하단밴드 접근 시 분할 매수 전략 추천")
+            advice_points.append(f"☑️ 첫 매수는 총 자금의 {risk_strategy.get('tranches', [25])[0]}% 권장")
+            if current_dev_percent < -10:
+                advice_points.append(f"☑️ 이격도 {current_dev_percent:.2f}%로 과매도 상태, 반등 가능성 주시")
+        
+        if mfi_value is not None:
+            if mfi_value > 80 and current_b_value > 0.5:
+                advice_points.append(f"☑️ MFI {mfi_value:.2f}로 매도 신호 보강")
+            elif mfi_value < 20 and current_b_value < 0.5:
+                advice_points.append(f"☑️ MFI {mfi_value:.2f}로 매수 신호 보강")
+            elif (mfi_value > 80 and current_b_value < 0.5) or (mfi_value < 20 and current_b_value > 0.5):
+                advice_points.append(f"☑️ MFI {mfi_value:.2f}와 %B {current_b_value:.2f} 간 배치, 신중한 접근 필요")
+        
+        # 추출된 조언 포인트를 메시지에 추가
+        if advice_points:
+            formatted_message += "\n" + "\n".join(advice_points)
+        
+        # 밴드타기 정보 추가
+        if band_riding_detection and 'band_riding' in trading_signal['data']:
+            br_result = trading_signal['data']['band_riding']
+            formatted_message += f"\n\n*[밴드타기 감지]*"
+            formatted_message += f"\n{br_result['message']}"
+            
+            if br_result['is_strong_trend'] and br_result['trend_message']:
+                formatted_message += f"\n{br_result['trend_message']}"
+            
+            # 경고 메시지
+            if signal == "Sell" and br_result['is_strong_trend']:
+                formatted_message += "\n\n⚠️ 매도 신호가 발생했으나, 강한 상승 추세로 판단됩니다. 트레일링 스탑을 고려하세요."
+        
+        # 위험 관리 전략 정보 추가
+        if 'risk_management' in trading_signal['data']:
+            risk_msg = trading_signal['data']['risk_management'].get('strategy_message', '')
+            if risk_msg:
+                formatted_message += f"\n\n*[위험 관리 전략]*\n{risk_msg}"
+            
+            stop_price = trading_signal['data']['risk_management'].get('stop_loss_price')
+            if stop_price:
+                formatted_message += f"\n🛑 손절 가격: ${stop_price:.2f}"
+        
+        # 알림 필요시 전송
+        if signal and signal != "Hold":
+            success = send_slack_message(formatted_message, method=notify_method)
+            if success:
+                print(f"{actual_ticker} 알림 전송 성공!")
+            else:
+                print(f"{actual_ticker} 알림 전송 실패!")
+        elif force_notify:
+            # force_notify가 True일 경우 Hold 신호라도 알림 전송
+            formatted_message = formatted_message.replace(f"*[{actual_ticker} 거래 신호: {signal}]*", f"*[{actual_ticker} 일일 보고서]*")
+            formatted_message += "\n\n*[참고]*\n현재 특별한 매매 신호는 없으나, 일일 보고서로 전송됩니다."
+            success = send_slack_message(formatted_message, method=notify_method)
+            if success:
+                print(f"{actual_ticker} 일일 보고서 알림 전송 성공!")
+            else:
+                print(f"{actual_ticker} 일일 보고서 알림 전송 실패!")
+        else:
+            print(f"{actual_ticker}에 대한 알림 조건 없음")
+                
+    except Exception as e:
+        print(f"오류 발생: {actual_ticker} 분석 중 예외가 발생했습니다 - {str(e)}")
+
+# 메인 실행 코드
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="주식 거래 신호 체크 및 알림 전송")
+    parser.add_argument("--ticker", type=str, help="분석할 주식 종목 티커 심볼")
+    parser.add_argument("--notify_method", type=str, choices=['json_body', 'formatted_message'], default='json_body', help="알림 전송 방식")
+    parser.add_argument("--tranche_count", type=int, default=3, help="분할 매수 단계 수")
+    parser.add_argument("--stop_loss_percent", type=float, default=7, help="손절 비율 (%%)")
+    parser.add_argument("--band_riding_detection", action='store_true', default=True, help="밴드타기 감지 여부")
+    parser.add_argument("--risk_management_level", type=str, choices=['low', 'medium', 'high'], default="medium", help="위험 관리 수준")
+    parser.add_argument("--use_mfi_filter", action='store_true', default=False, help="MFI 필터 사용 여부")
+    parser.add_argument("--force_notify", action='store_true', default=False, help="매매 신호가 없어도 알림을 강제로 보냄")
+    parser.add_argument("--language", type=str, choices=['ko', 'en'], default='ko', help="언어 설정 (ko: 한국어, en: 영어)")
+    parser.add_argument("--now", action='store_true', help="지금 즉시 신호 체크")
+    parser.add_argument("--schedule", action='store_true', help="스케줄러로 정기적 실행")
+    parser.add_argument("--schedule-time", type=str, default="06:00", help="스케줄러 실행 시간 (HH:MM 형식, 기본값: 06:00)")
+
+    args = parser.parse_args()
+    
+    # 언어 설정
+    set_language(args.language)
+
+    # 스케줄러 실행 함수
+    def run_scheduler():
+        """
+        정해진 시간에 주기적으로 신호를 체크하고 알림을 전송하는 스케줄러를 실행합니다.
+        기본적으로 매일 06:00 (서버 시간)에 실행됩니다.
+        """
+        print(f"스케줄러가 시작되었습니다. 매일 {args.schedule_time}에 {args.ticker if args.ticker else DEFAULT_TICKER} 종목을 분석합니다.")
+        
+        # 지정된 시간에 신호 체크 실행
+        schedule.every().day.at(args.schedule_time).do(
+            check_trading_signal,
+            ticker=args.ticker,
+            notify_method=args.notify_method,
+            tranche_count=args.tranche_count,
+            stop_loss_percent=args.stop_loss_percent,
+            band_riding_detection=args.band_riding_detection,
+            risk_management_level=args.risk_management_level,
+            use_mfi_filter=args.use_mfi_filter,
+            force_notify=args.force_notify
+        )
+        
+        # 스케줄러 계속 실행
         while True:
             schedule.run_pending()
             time.sleep(60)  # 1분마다 스케줄 확인
-    except KeyboardInterrupt:
-        print("\n프로그램이 종료되었습니다.")
 
-def test_slack_notification(notify_method='json_body', use_blocks=False):
-    """
-    Slack 알림 전송을 테스트합니다.
-    
-    Args:
-        notify_method (str): 알림 전송 방식 ('json_body' 또는 'payload_param')
-        use_blocks (bool): 블록 형식 메시지 사용 여부
-    """
-    current_time = time.strftime("%Y-%m-%d %H:%M:%S")
-    
-    if use_blocks:
-        # Slack 블록 형식의 메시지
-        blocks = [
-            {
-                "type": "header",
-                "text": {
-                    "type": "plain_text",
-                    "text": "📊 주식 거래 알림 테스트",
-                    "emoji": True
-                }
-            },
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"*시간:* {current_time}\n*상태:* 테스트 메시지"
-                }
-            },
-            {
-                "type": "divider"
-            },
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": "이 메시지는 Slack 웹훅 연결 테스트를 위한 것입니다."
-                }
-            }
-        ]
-        
-        success = send_slack_formatted_message(blocks, text="주식 거래 알림 테스트")
+    # 명령어에 따른 실행
+    if args.schedule:
+        # 스케줄러 모드로 실행
+        run_scheduler()
     else:
-        # 일반 텍스트 메시지
-        test_message = f"""
-[테스트 알림]
-이것은 Slack 웹훅 연결을 테스트하는 메시지입니다.
-시간: {current_time}
-"""
-        success = send_slack_message(test_message, method=notify_method)
-    
-    if success:
-        print("Slack 알림 전송 성공!")
-    else:
-        print("Slack 알림 전송 실패!")
-
-def main():
-    """명령행 인수 처리 및 실행"""
-    parser = argparse.ArgumentParser(description='주식 거래 신호 모니터링 프로그램')
-    
-    # 주식 정보 관련 인수
-    parser.add_argument('--stock-info', 
-                        help='주식 정보 (형식: 티커/구매가/목표수익률%)')
-    parser.add_argument('--ticker', 
-                        help='주식 종목 티커 심볼')
-    parser.add_argument('--purchase-price', type=float, 
-                        help='구매 가격')
-    parser.add_argument('--target-gain', type=float, 
-                        help='목표 수익률 (%)')
-    
-    # Slack 웹훅 관련 인수
-    parser.add_argument('--webhook-url', 
-                        help='Slack 웹훅 URL')
-    parser.add_argument('--notify-method', choices=['json_body', 'payload_param'], 
-                        default='json_body', 
-                        help='Slack 알림 전송 방식')
-    
-    # 실행 모드 관련 인수
-    parser.add_argument('--now', action='store_true', 
-                        help='지금 바로 확인하고 종료')
-    parser.add_argument('--schedule', action='store_true', 
-                        help='스케줄링된 방식으로 실행')
-    parser.add_argument('--test-slack', action='store_true', 
-                        help='Slack 웹훅 연결 테스트')
-    parser.add_argument('--use-blocks', action='store_true', 
-                        help='Slack 블록 형식 사용')
-    
-    # 새로운 전략 관련 인수
-    parser.add_argument('--tranche', type=int, default=3,
-                        help='분할 매수 단계 수 (기본값: 3)')
-    parser.add_argument('--stop-loss', type=float, default=7, 
-                        help='손절 비율 (%, 기본값: 7)')
-    parser.add_argument('--band-riding', type=str, choices=['true', 'false'], default='true',
-                        help='밴드타기 감지 여부 (기본값: true)')
-    parser.add_argument('--risk-management', choices=['low', 'medium', 'high'], default='medium',
-                        help='위험 관리 수준 (기본값: medium)')
-    
-    args = parser.parse_args()
-    
-    # 밴드타기 문자열을 불리언으로 변환
-    band_riding_detection = args.band_riding.lower() == 'true'
-    
-    # Slack 웹훅 URL 설정 (입력된 경우)
-    if args.webhook_url:
-        set_webhook_url(args.webhook_url)
-    
-    # 주식 정보 파싱 (--stock-info 인수가 제공된 경우)
-    if args.stock_info:
-        parts = args.stock_info.split('/')
-        if len(parts) >= 3:
-            ticker = parts[0]
-            purchase_price = float(parts[1])
-            target_gain = float(parts[2])
-            
-            # 주식 정보 설정
-            set_ticker(ticker)
-            set_target_params(purchase_price, target_gain)
-            print(f"주식 정보 설정: {ticker}, 구매가: ${purchase_price}, 목표 수익률: {target_gain}%")
-    else:
-        # 개별 인수로 주식 정보 설정
-        if args.ticker:
-            set_ticker(args.ticker)
-        
-        if args.purchase_price is not None and args.target_gain is not None:
-            set_target_params(args.purchase_price, args.target_gain)
-    
-    # 실행 모드에 따라 다르게 처리
-    if args.test_slack:
-        # Slack 웹훅 테스트
-        test_slack_notification(args.notify_method, args.use_blocks)
-    elif args.now:
-        # 즉시 확인
+        # 즉시 실행 모드
         check_trading_signal(
+            ticker=args.ticker,
             notify_method=args.notify_method,
-            tranche_count=args.tranche,
-            stop_loss_percent=args.stop_loss,
-            band_riding_detection=band_riding_detection,
-            risk_management_level=args.risk_management
+            tranche_count=args.tranche_count,
+            stop_loss_percent=args.stop_loss_percent,
+            band_riding_detection=args.band_riding_detection,
+            risk_management_level=args.risk_management_level,
+            use_mfi_filter=args.use_mfi_filter,
+            force_notify=args.force_notify
         )
-    elif args.schedule:
-        # 스케줄링된 방식으로 실행
-        run_scheduler(
-            notify_method=args.notify_method,
-            tranche_count=args.tranche,
-            stop_loss_percent=args.stop_loss,
-            band_riding_detection=band_riding_detection,
-            risk_management_level=args.risk_management
-        )
-    else:
-        # 기본적으로 스케줄링 모드로 실행
-        run_scheduler(
-            notify_method=args.notify_method,
-            tranche_count=args.tranche,
-            stop_loss_percent=args.stop_loss,
-            band_riding_detection=band_riding_detection,
-            risk_management_level=args.risk_management
-        )
-
-if __name__ == "__main__":
-    main() 

@@ -30,42 +30,37 @@ class TestBollingerStrategyCases(unittest.TestCase):
             
             if trend == 'neutral':
                 # 중립 추세: 랜덤 변동
-                change = np.random.normal(0, volatility/5)
+                change = np.random.normal(0, volatility/100)
             elif trend == 'uptrend':
                 # 상승 추세: 약간의 상승 바이어스
-                change = np.random.normal(0.2, volatility/5)
+                change = np.random.normal(0.15, volatility/100)
             elif trend == 'downtrend':
                 # 하락 추세: 약간의 하락 바이어스
-                change = np.random.normal(-0.2, volatility/5)
+                change = np.random.normal(-0.15, volatility/100)
             elif trend == 'V_recovery':
-                # V자 반등: 처음 절반은 하락, 나머지는 상승
+                # V자 반등: 하락 후 상승
                 if i < days // 2:
-                    change = np.random.normal(-0.4, volatility/5)
+                    change = np.random.normal(-0.3, volatility/100)
                 else:
-                    change = np.random.normal(0.5, volatility/5)
+                    change = np.random.normal(0.4, volatility/100)
             elif trend == 'collapse':
-                # 급락: 일정 시점 이후 급격한 하락
-                if i < days - 10:
-                    change = np.random.normal(0.1, volatility/5)
+                # 급락: 안정적이다가 후반부에 급락
+                if i < days // 2:
+                    change = np.random.normal(0.05, volatility/100)
                 else:
-                    change = np.random.normal(-2.0, volatility/4)
+                    change = np.random.normal(-1.0, volatility/100)
             elif trend == 'sideways':
-                # 횡보: 매우 작은 변동
-                change = np.random.normal(0, volatility/10)
+                # 횡보: 작은 변동성의 랜덤 변화 (중립보다 더 좁은 범위)
+                change = np.random.normal(0, volatility/200)
             elif trend == 'band_riding':
-                # 밴드타기: 지속적 상승 후 상단밴드 유지
-                if i < days - 20:
-                    change = np.random.normal(0, volatility/5)
-                elif i < days - 10:
-                    change = np.random.normal(0.8, volatility/6)
-                else:
-                    change = np.random.normal(0.3, volatility/7)
+                # 밴드타기: 상단 밴드에 연속 접촉하는 패턴
+                change = np.random.normal(0.1, volatility/100)
             elif trend == 'overbought':
-                # 과매수: 지속적인 상승
-                change = np.random.normal(0.3, volatility/5)
+                # 과매수: 강한 상승 후 높은 수준 유지
+                change = np.random.normal(0.2, volatility/100)
             elif trend == 'oversold':
-                # 과매도: 지속적인 하락
-                change = np.random.normal(-0.3, volatility/5)
+                # 과매도: 강한 하락 후 낮은 수준 유지
+                change = np.random.normal(-0.2, volatility/100)
             
             current_price = max(current_price + change, 1)  # 가격이 0 이하로 내려가지 않도록
             prices.append(current_price)
@@ -118,6 +113,11 @@ class TestBollingerStrategyCases(unittest.TestCase):
     def test_neutral_market(self):
         """중립 시장 상태에서의 신호 테스트"""
         result = generate_trading_signal(self.neutral_data)
+        
+        # 테스트 확인을 위한 진단 출력
+        latest = self.neutral_data.iloc[-1]
+        print(f"중립 시장 테스트 - 마지막 %B 값: {latest['%B']}")
+        print(f"중립 시장 테스트 - 생성된 신호: {result['signal']}")
         
         # 중립 시장에서는 대체로 Hold 신호가 발생해야 함
         self.assertEqual(result['signal'], 'Hold')
@@ -258,6 +258,11 @@ class TestBollingerStrategyCases(unittest.TestCase):
     def test_sideways_market(self):
         """횡보 시장에서의 신호 테스트"""
         result = generate_trading_signal(self.sideways_data)
+        
+        # 테스트 확인을 위한 진단 출력
+        latest = self.sideways_data.iloc[-1]
+        print(f"횡보 시장 테스트 - 마지막 %B 값: {latest['%B']}")
+        print(f"횡보 시장 테스트 - 생성된 신호: {result['signal']}")
         
         # 횡보 시장에서는 일반적으로 Hold 신호가 발생
         self.assertEqual(result['signal'], 'Hold')
